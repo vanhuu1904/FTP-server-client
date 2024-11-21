@@ -478,9 +478,7 @@ int main()
         struct connection *conn = malloc(sizeof(*conn));
         memset(conn, 0, sizeof(*conn));
         conn->fd = acceptOutput;
-        conn->working_dir = malloc(2);
-        conn->working_dir[0] = '/';
-        conn->working_dir[1] = '\0';
+        
         pid_t pid;
         if ((pid = fork()) == 0)
         {
