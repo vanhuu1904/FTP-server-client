@@ -167,58 +167,6 @@ int indexDB;
 Account account[10];
 int accountNum;
 
-int open_data_conn(struct connection *conn)
-{
-    if (conn == NULL)
-    {
-        return -1;
-    }
-    if (conn->passive == 1)
-    {
-        /* Passive mode. */
-        write(conn->fd, opening_data_conn, strlen(opening_data_conn));
-
-        if (conn->pasv_sock == 0)
-        {
-            /* A PASV command was not sent before this. */
-            write(conn->fd, cant_open_data, strlen(cant_open_data));
-            return -1;
-        }
-
-        /* PASV command should have set a passive socket to accept from. */
-        struct sockaddr_in addr;
-        socklen_t addr_size = sizeof(addr);
-        int data_sock = accept(conn->pasv_sock, (struct sockaddr *)&addr, &addr_size);
-
-        if (data_sock < 0)
-        {
-            write(conn->fd, cant_open_data, strlen(cant_open_data));
-            return -1;
-        }
-
-        close(conn->pasv_sock);
-        return data_sock;
-    }
-    return -1;
-};
-
-int close_data_conn(int fd, struct connection *conn)
-{
-    if (conn == NULL)
-    {
-        return -1;
-    }
-    if (fd < 0)
-    {
-        return -1;
-    }
-
-    close(fd);
-    conn->passive = 0;
-    conn->pasv_sock = 0;
-
-    return 0;
-};
 
 void readAccount()
 {
