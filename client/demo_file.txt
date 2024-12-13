@@ -1,1 +1,1 @@
-This is a demo file for STOR command.
+demo file text

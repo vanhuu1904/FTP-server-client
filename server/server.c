@@ -14,7 +14,7 @@
 #include <stdint.h>
 #include <fcntl.h>
 #define MAX_LINE_LENGTH 300
-#define PORT 1234
+#define PORT 1236
 static const char *cmd_funcs[] = {
     "USER", "PASS", "SYST", "QUIT", "LIST", "PASV", "CWD", "CDUP", "PWD", "RETR", "STOR",
     "DELE", "RMD", "MKD", "TYPE", NULL};
@@ -535,7 +535,7 @@ void ftp_cmd_list(struct command *cmd, struct connection *conn)
             operm[2] = 'x';
         }
 
-        dprintf(data_sock, "%c%s%s%s %s %s %8ld %s \n", ftype, uperm, gperm, operm, owner_info != NULL ? owner_info->pw_name : "UNKNOWN_OWNER",
+        dprintf(data_sock, "%c%s%s%s %s %s %8ld %s \r\n", ftype, uperm, gperm, operm, owner_info != NULL ? owner_info->pw_name : "UNKNOWN_OWNER",
                 group_info != NULL ? group_info->gr_name : "UNKNOWN_GROUP", (long)fs.st_size, ent->d_name);
     }
 
