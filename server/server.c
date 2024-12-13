@@ -14,7 +14,7 @@
 #include <stdint.h>
 #include <fcntl.h>
 #define MAX_LINE_LENGTH 300
-#define PORT 123456
+#define PORT 1234
 static const char *cmd_funcs[] = {
     "USER", "PASS", "SYST", "QUIT", "LIST", "PASV", "CWD", "CDUP", "PWD", "RETR", "STOR",
     "DELE", "RMD", "MKD", "TYPE", NULL};
@@ -109,6 +109,29 @@ struct command *str_to_cmd(char *raw)
     return cmd;
 };
 
+char *construct_full_path(char *file_name, char *working_dir)
+{
+    if (!file_name || !working_dir)
+    {
+        return NULL;
+    }
+
+    char *fpath = malloc(strlen(file_name) + strlen(working_dir) + 2);
+    if (fpath == NULL)
+    {
+        return NULL;
+    }
+
+    fpath[0] = '.';
+    fpath[1] = '\0';
+
+    /* conn->working_dir always begins with a slash*/
+    strcat(fpath, working_dir);
+    strcat(fpath, file_name);
+
+    return fpath;
+};
+
 char *read_line(int fd, int block_size)
 {
     char c[block_size];
@@ -150,10 +173,15 @@ char login_success[] = "230 User logged in, proceed.\n";
 char login_invalid[] = "430 Invalid username/password.\n";
 char logout_success[] = "221 Service closing control connection.\n";
 char need_pass[] = "331 User name okay, need password.\n";
+char system_info[] = "215 LINUX\n";
 char bad_sequence[] = "503 Bad sequence of commands.\n";
 char not_implemented[] = "502 Command not implemented.\n";
 char port_success[] = "200 Command Okay.\n";
+char typei_success[] = "200 Switching to binary mode (image).\n";
+char typea_success[] = "200 Switching to ASCII mode.\n";
+char file_unavailable[] = "550 File unavailable. \n";
 char need_login[] = "530 Not logged in.\n";
+char delete_success[] = "250 Delete success. \n";
 
 char opening_data_conn[] = "150 Opening data connection.\n";
 char closing_data_conn[] = "226 Closing data connection. Requested file action successful. \n";
@@ -167,6 +195,58 @@ int indexDB;
 Account account[10];
 int accountNum;
 
+int open_data_conn(struct connection *conn)
+{
+    if (conn == NULL)
+    {
+        return -1;
+    }
+    if (conn->passive == 1)
+    {
+        /* Passive mode. */
+        write(conn->fd, opening_data_conn, strlen(opening_data_conn));
+
+        if (conn->pasv_sock == 0)
+        {
+            /* A PASV command was not sent before this. */
+            write(conn->fd, cant_open_data, strlen(cant_open_data));
+            return -1;
+        }
+
+        /* PASV command should have set a passive socket to accept from. */
+        struct sockaddr_in addr;
+        socklen_t addr_size = sizeof(addr);
+        int data_sock = accept(conn->pasv_sock, (struct sockaddr *)&addr, &addr_size);
+
+        if (data_sock < 0)
+        {
+            write(conn->fd, cant_open_data, strlen(cant_open_data));
+            return -1;
+        }
+
+        close(conn->pasv_sock);
+        return data_sock;
+    }
+    return -1;
+};
+
+int close_data_conn(int fd, struct connection *conn)
+{
+    if (conn == NULL)
+    {
+        return -1;
+    }
+    if (fd < 0)
+    {
+        return -1;
+    }
+
+    close(fd);
+    conn->passive = 0;
+    conn->pasv_sock = 0;
+
+    return 0;
+};
 
 void readAccount()
 {
@@ -300,6 +380,478 @@ void ftp_cmd_quit(struct command *cmd, struct connection *conn)
     return;
 };
 
+void ftp_cmd_pasv(struct command *cmd, struct connection *conn)
+{
+    int port = gen_port();
+    if (cmd == NULL)
+    {
+        return;
+    }
+    if (conn == NULL)
+    {
+        return;
+    }
+
+    int port1 = port & 0xFF;
+    int port2 = (port >> 8) & 0xFF;
+
+    conn->pasv_sock = socket(AF_INET, SOCK_STREAM, 0);
+    if (conn->pasv_sock < 0)
+    {
+        conn->pasv_sock = 0;
+        write(conn->fd, internal_err, strlen(internal_err));
+        return;
+    }
+
+    /* Bind socket, and set it to listening mode. */
+    struct sockaddr_in paddr;
+    int addr_len = sizeof(paddr);
+    paddr.sin_family = AF_INET;
+    paddr.sin_addr.s_addr = INADDR_ANY;
+    paddr.sin_port = port;
+
+    if (bind(conn->pasv_sock, (struct sockaddr *)&paddr, addr_len))
+    {
+        close(conn->pasv_sock);
+        conn->pasv_sock = 0;
+        write(conn->fd, internal_err, strlen(internal_err));
+        return;
+    }
+
+    listen(conn->pasv_sock, 1);
+
+    conn->passive = 1;
+    dprintf(conn->fd, "227 Entering passive mode (127,0,0,1,%d,%d) \n",
+            port1, port2);
+    return;
+};
+
+void ftp_cmd_list(struct command *cmd, struct connection *conn)
+{
+    if (cmd == NULL)
+    {
+        return;
+    }
+    if (conn == NULL)
+    {
+        return;
+    }
+
+    int data_sock = open_data_conn(conn);
+    if (data_sock < 0)
+    {
+        return;
+    }
+
+    /* First, open the directory. */
+    char *path = malloc(strlen(conn->working_dir) + 2);
+    path[0] = '.';
+    path[1] = '\0';
+    strcat(path, conn->working_dir);
+
+    DIR *cdfd = opendir(path);
+    struct dirent *ent;
+
+    /* Send directory entries. */
+    struct stat fs;
+
+    while ((ent = readdir(cdfd)) != NULL)
+    {
+        /* Construct the path of the file relative to the working directory. */
+        char *file_path = malloc(strlen(path) + strlen(ent->d_name) + 1);
+        strcpy(file_path, path);
+        strcat(file_path, ent->d_name);
+
+        stat(file_path, &fs);
+        struct passwd *owner_info = getpwuid(fs.st_uid);
+        struct group *group_info = getgrgid(fs.st_gid);
+        struct tm *modification_time = localtime(&fs.st_mtime);
+        free(file_path);
+        /* Determine file type. */
+        char ftype = '-';
+
+        if (S_ISREG(fs.st_mode))
+        {
+            ftype = '-';
+        }
+        else if (S_ISDIR(fs.st_mode))
+        {
+            ftype = 'd';
+        }
+        else if (S_ISCHR(fs.st_mode))
+        {
+            ftype = 'c';
+        }
+        else if (S_ISBLK(fs.st_mode))
+        {
+            ftype = 'b';
+        }
+        else if (S_ISLNK(fs.st_mode))
+        {
+            ftype = 'l';
+        }
+
+        /* Determine file permissions. */
+        char uperm[4] = "---";
+        char gperm[4] = "---";
+        char operm[4] = "---";
+
+        if (fs.st_mode & 00400)
+        {
+            uperm[0] = 'r';
+        }
+        if (fs.st_mode & 00200)
+        {
+            uperm[1] = 'w';
+        }
+        if (fs.st_mode & 00100)
+        {
+            uperm[2] = 'x';
+        }
+
+        if (fs.st_mode & 00040)
+        {
+            gperm[0] = 'r';
+        }
+        if (fs.st_mode & 00020)
+        {
+            gperm[1] = 'w';
+        }
+        if (fs.st_mode & 00010)
+        {
+            gperm[2] = 'x';
+        }
+
+        if (fs.st_mode & 00004)
+        {
+            operm[0] = 'r';
+        }
+        if (fs.st_mode & 00002)
+        {
+            operm[1] = 'w';
+        }
+        if (fs.st_mode & 00001)
+        {
+            operm[2] = 'x';
+        }
+
+        dprintf(data_sock, "%c%s%s%s %s %s %8ld %s \n", ftype, uperm, gperm, operm, owner_info != NULL ? owner_info->pw_name : "UNKNOWN_OWNER",
+                group_info != NULL ? group_info->gr_name : "UNKNOWN_GROUP", (long)fs.st_size, ent->d_name);
+    }
+
+    closedir(cdfd);
+    free(path);
+
+    write(conn->fd, closing_data_conn, strlen(closing_data_conn));
+    close_data_conn(data_sock, conn);
+    return;
+};
+
+void ftp_cmd_cwd(struct command *cmd, struct connection *conn)
+{
+    if (cmd == NULL)
+    {
+        return;
+    }
+    if (conn == NULL)
+    {
+        return;
+    }
+
+    if (cmd->arg == NULL)
+    {
+        return;
+    }
+
+    /* CWD should not be used to move to the parent directory. */
+    for (int i = 0; i < strlen(cmd->arg); i++)
+    {
+        if (!strncmp(cmd->arg + i, "..", 2))
+        {
+            write(conn->fd, invalid_param, strlen(invalid_param));
+            return;
+        }
+    }
+
+    char *slash = "/";
+    conn->working_dir = realloc(conn->working_dir, strlen(conn->working_dir) + 3 + strlen(cmd->arg));
+    strcat(conn->working_dir, cmd->arg);
+    strcat(conn->working_dir, slash);
+
+    write(conn->fd, succ, strlen(succ));
+    return;
+};
+
+/* PWD - Print Working Directory. */
+void ftp_cmd_pwd(struct command *cmd, struct connection *conn)
+{
+    if (cmd == NULL)
+    {
+        return;
+    }
+    if (conn == NULL)
+    {
+        return;
+    }
+
+    dprintf(conn->fd, "257 Your current working directory is '%s'\n", conn->working_dir);
+    return;
+};
+
+void ftp_cmd_retr(struct command *cmd, struct connection *conn)
+{
+    if (cmd == NULL)
+    {
+        return;
+    }
+    if (conn == NULL)
+    {
+        return;
+    }
+
+    /* Construct the path to the file. */
+    char *fpath = malloc(strlen(conn->working_dir) + strlen(cmd->arg) + 2);
+    fpath[0] = '.';
+    fpath[1] = '\0';
+
+    strcat(fpath, conn->working_dir);
+    strcat(fpath, cmd->arg);
+
+    /* Open the file.*/
+    int fd = open(fpath, O_RDWR);
+    if (fd < 0)
+    {
+        write(conn->fd, file_unavailable, strlen(file_unavailable));
+        return;
+    }
+
+    /* Now that we're sure the file exists and can be transferred, open data conn.*/
+    int data_sock = open_data_conn(conn);
+    if (data_sock < 0)
+    {
+        close(fd);
+        return;
+    }
+
+    /* Get the file size, then send the file. */
+    off_t flen = lseek(fd, 0, SEEK_END);
+    lseek(fd, 0, SEEK_SET);
+
+#ifdef __APPLE__
+    off_t offset = 0;
+    off_t length = flen;
+    int result = sendfile(fd, data_sock, offset, &length, NULL, 0);
+    if (result == -1)
+    {
+        perror("Error during file transfer");
+        write(conn->fd, internal_err, strlen(internal_err));
+    }
+#else
+    sendfile(data_sock, fd, NULL, flen);
+#endif
+    close(fd);
+
+    /* Transfer complete. */
+    write(conn->fd, closing_data_conn, strlen(closing_data_conn));
+    close_data_conn(data_sock, conn);
+    return;
+};
+
+/* STOR - Store file. */
+void ftp_cmd_stor(struct command *cmd, struct connection *conn)
+{
+    if (cmd == NULL)
+    {
+        return;
+    }
+    if (conn == NULL)
+    {
+        return;
+    }
+
+    /* First, open the file. */
+    char *fpath = malloc(strlen(conn->working_dir) + strlen(cmd->arg) + 3);
+    fpath[0] = '.';
+    fpath[1] = '\0';
+
+    strcat(fpath, conn->working_dir);
+    strcat(fpath, cmd->arg);
+
+    int fd = open(fpath, O_WRONLY | O_CREAT | O_TRUNC, S_IRWXU);
+    free(fpath);
+
+    if (fd < 0)
+    {
+        write(conn->fd, file_unavailable, strlen(file_unavailable));
+        return;
+    }
+
+    /* Open the data connection. */
+    int data_sock = open_data_conn(conn);
+    if (data_sock < 0)
+    {
+        close(fd);
+        return;
+    }
+
+    /* Read from the socket, then write to the file.  */
+    int block_size = 0x1000;
+    int bytes_read = 0;
+    char *buf = malloc(block_size);
+
+    while ((bytes_read = read(data_sock, buf, block_size)) > 0)
+    {
+        write(fd, buf, bytes_read);
+    }
+    free(buf);
+    close(fd);
+
+    write(conn->fd, closing_data_conn, strlen(closing_data_conn));
+    close_data_conn(data_sock, conn);
+    return;
+};
+
+/* DELE - Delete file. */
+void ftp_cmd_dele(struct command *cmd, struct connection *conn)
+{
+    if (cmd == NULL)
+    {
+        return;
+    }
+    if (conn == NULL)
+    {
+        return;
+    }
+
+    char *fpath = construct_full_path(cmd->arg, conn->working_dir);
+
+    int s = unlink(fpath);
+    free(fpath);
+
+    if (s < 0)
+    {
+        write(conn->fd, file_unavailable, strlen(file_unavailable));
+        return;
+    }
+
+    write(conn->fd, delete_success, strlen(delete_success));
+    return;
+};
+
+void ftp_cmd_rmd(struct command *cmd, struct connection *conn)
+{
+    if (cmd == NULL)
+    {
+        return;
+    }
+    if (conn == NULL)
+    {
+        return;
+    }
+
+    char *fpath = construct_full_path(cmd->arg, conn->working_dir);
+
+    int s = rmdir(fpath);
+    free(fpath);
+
+    if (s < 0)
+    {
+        write(conn->fd, file_unavailable, strlen(file_unavailable));
+        return;
+    }
+
+    write(conn->fd, delete_success, strlen(delete_success));
+    return;
+};
+
+void ftp_cmd_mkd(struct command *cmd, struct connection *conn)
+{
+    if (cmd == NULL)
+    {
+        return;
+    }
+    if (conn == NULL)
+    {
+        return;
+    }
+
+    char *fpath = construct_full_path(cmd->arg, conn->working_dir);
+
+    int s = mkdir(fpath, 0744);
+    free(fpath);
+
+    if (s < 0)
+    {
+        write(conn->fd, file_unavailable, strlen(file_unavailable));
+        return;
+    }
+
+    write(conn->fd, succ, strlen(succ));
+    return;
+};
+
+void ftp_cmd_cdup(struct command *cmd, struct connection *conn)
+{
+    if (cmd == NULL)
+    {
+        return;
+    }
+    if (conn == NULL)
+    {
+        return;
+    }
+
+    int cur_len = strlen(conn->working_dir);
+    if (cur_len <= 2)
+    {
+        write(conn->fd, succ, strlen(succ));
+        return;
+    }
+
+    int len = 0;
+    for (int i = cur_len - 2; i >= 0; i--, len++)
+    {
+        if (conn->working_dir[i] == '/')
+        {
+            conn->working_dir[i + 1] = '\0';
+            break;
+        }
+    }
+
+    /* Now resize the string. */
+    conn->working_dir = realloc(conn->working_dir, cur_len - len + 1);
+
+    write(conn->fd, succ, strlen(succ));
+    return;
+};
+
+void ftp_cmd_type(struct command *cmd, struct connection *conn)
+{
+    if (cmd == NULL || conn == NULL)
+    {
+        return;
+    }
+
+    if (cmd->arg == NULL)
+    {
+        return;
+    }
+
+    if (strcmp(cmd->arg, "I") == 0)
+    {
+        // Handle binary mode
+        write(conn->fd, typei_success, strlen(typei_success));
+        // You may want to implement further logic based on the binary mode.
+    }
+    else if (strcmp(cmd->arg, "A") == 0)
+    {
+        // Handle ASCII mode
+        write(conn->fd, typea_success, strlen(typea_success));
+        // You may want to implement further logic based on the ASCII mode.
+    }
+    return;
+};
+
 int handle_cmd(struct command *cmd, struct connection *conn)
 {
     if (cmd == NULL)
@@ -337,6 +889,60 @@ int handle_cmd(struct command *cmd, struct connection *conn)
     {
         write(conn->fd, need_login, strlen(need_login));
         return 0;
+    }
+
+    switch (cmd->type)
+    {
+    case FTP_SYST:
+        write(conn->fd, system_info, strlen(system_info));
+        break;
+
+    case FTP_LIST:
+        ftp_cmd_list(cmd, conn);
+        break;
+
+    case FTP_PASV:
+        ftp_cmd_pasv(cmd, conn);
+        break;
+
+    case FTP_CWD:
+        ftp_cmd_cwd(cmd, conn);
+        break;
+
+    case FTP_CDUP:
+        ftp_cmd_cdup(cmd, conn);
+        break;
+
+    case FTP_PWD:
+        ftp_cmd_pwd(cmd, conn);
+        break;
+
+    case FTP_RETR:
+        ftp_cmd_retr(cmd, conn);
+        break;
+
+    case FTP_STOR:
+        ftp_cmd_stor(cmd, conn);
+        break;
+
+    case FTP_DELE:
+        ftp_cmd_dele(cmd, conn);
+        break;
+
+    case FTP_RMD:
+        ftp_cmd_rmd(cmd, conn);
+        break;
+
+    case FTP_MKD:
+        ftp_cmd_mkd(cmd, conn);
+        break;
+    case FTP_TYPE:
+        ftp_cmd_type(cmd, conn);
+        break;
+
+    default:
+        write(conn->fd, not_implemented, strlen(not_implemented));
+        break;
     }
 
     return 0;
@@ -426,7 +1032,9 @@ int main()
         struct connection *conn = malloc(sizeof(*conn));
         memset(conn, 0, sizeof(*conn));
         conn->fd = acceptOutput;
-        
+        conn->working_dir = malloc(2);
+        conn->working_dir[0] = '/';
+        conn->working_dir[1] = '\0';
         pid_t pid;
         if ((pid = fork()) == 0)
         {
