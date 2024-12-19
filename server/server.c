@@ -13,8 +13,9 @@
 #include <time.h>
 #include <stdint.h>
 #include <fcntl.h>
+#include <arpa/inet.h>
 #define MAX_LINE_LENGTH 300
-#define PORT 1236
+#define PORT 1234
 static const char *cmd_funcs[] = {
     "USER", "PASS", "SYST", "QUIT", "LIST", "PASV", "CWD", "CDUP", "PWD", "RETR", "STOR",
     "DELE", "RMD", "MKD", "TYPE", NULL};
@@ -168,27 +169,27 @@ ret:
     return buf;
 };
 
-char welcome[] = "220 Service ready for new user.\n";
-char login_success[] = "230 User logged in, proceed.\n";
-char login_invalid[] = "430 Invalid username/password.\n";
-char logout_success[] = "221 Service closing control connection.\n";
-char need_pass[] = "331 User name okay, need password.\n";
-char system_info[] = "215 LINUX\n";
-char bad_sequence[] = "503 Bad sequence of commands.\n";
-char not_implemented[] = "502 Command not implemented.\n";
-char port_success[] = "200 Command Okay.\n";
-char typei_success[] = "200 Switching to binary mode (image).\n";
-char typea_success[] = "200 Switching to ASCII mode.\n";
-char file_unavailable[] = "550 File unavailable. \n";
-char need_login[] = "530 Not logged in.\n";
-char delete_success[] = "250 Delete success. \n";
+char welcome[] = "220 Service ready for new user.\r\n";
+char login_success[] = "230 User logged in, proceed.\r\n";
+char login_invalid[] = "430 Invalid username/password.\r\n";
+char logout_success[] = "221 Service closing control connection.\r\n";
+char need_pass[] = "331 User name okay, need password.\r\n";
+char system_info[] = "215 LINUX\r\n";
+char bad_sequence[] = "503 Bad sequence of commands.\r\n";
+char not_implemented[] = "502 Command not implemented.\r\n";
+char port_success[] = "200 Command Okay.\r\n";
+char typei_success[] = "200 Switching to binary mode (image).\r\n";
+char typea_success[] = "200 Switching to ASCII mode.\r\n";
+char file_unavailable[] = "550 File unavailable. \r\n";
+char need_login[] = "530 Not logged in.\r\n";
+char delete_success[] = "250 Delete success. \r\n";
 
-char opening_data_conn[] = "150 Opening data connection.\n";
-char closing_data_conn[] = "226 Closing data connection. Requested file action successful. \n";
-char cant_open_data[] = "425 Can't open data connection.\n";
-char succ[] = "200 Command Okay.\n";
-char internal_err[] = "451 Internal server error.\n";
-char invalid_param[] = "504 Command not implemented for that parameter.\n";
+char opening_data_conn[] = "150 Opening data connection.\r\n";
+char closing_data_conn[] = "226 Closing data connection. Requested file action successful. \r\n";
+char cant_open_data[] = "425 Can't open data connection.\r\n";
+char succ[] = "200 Command Okay.\r\n";
+char internal_err[] = "451 Internal server error.\r\n";
+char invalid_param[] = "504 Command not implemented for that parameter.\r\n";
 
 char pwd[150];
 int indexDB;
@@ -210,6 +211,7 @@ int open_data_conn(struct connection *conn)
         {
             /* A PASV command was not sent before this. */
             write(conn->fd, cant_open_data, strlen(cant_open_data));
+            printf("test");
             return -1;
         }
 
@@ -337,10 +339,6 @@ void ftp_cmd_pass(struct command *cmd, struct connection *conn)
     if (!strcmp(cmd->arg, conn->u->password))
     {
         /* Correct password. */
-        // char *slash = "/";
-        // conn->working_dir = realloc(conn->working_dir, strlen(conn->working_dir) + 3 + strlen(conn->u->rootfolder));
-        // strcat(conn->working_dir, conn->u->rootfolder);
-        // strcat(conn->working_dir, slash);
         chdir(conn->u->rootfolder);
         conn->logged_in = 1;
         conn->u->online++;
@@ -408,7 +406,7 @@ void ftp_cmd_pasv(struct command *cmd, struct connection *conn)
     int addr_len = sizeof(paddr);
     paddr.sin_family = AF_INET;
     paddr.sin_addr.s_addr = INADDR_ANY;
-    paddr.sin_port = port;
+    paddr.sin_port = htons(port);
 
     if (bind(conn->pasv_sock, (struct sockaddr *)&paddr, addr_len))
     {
@@ -421,8 +419,35 @@ void ftp_cmd_pasv(struct command *cmd, struct connection *conn)
     listen(conn->pasv_sock, 1);
 
     conn->passive = 1;
-    dprintf(conn->fd, "227 Entering passive mode (127,0,0,1,%d,%d) \n",
-            port1, port2);
+    // Get the server's IP address
+   struct sockaddr_in serv_addr;
+    socklen_t len = sizeof(serv_addr);
+    if (getsockname(conn->fd, (struct sockaddr *)&serv_addr, &len) < 0)
+    {
+        perror("getsockname failed");
+        write(conn->fd, internal_err, strlen(internal_err));
+        return;
+    }
+
+    char ip_str[INET_ADDRSTRLEN];
+    if (inet_ntop(AF_INET, &serv_addr.sin_addr, ip_str, sizeof(ip_str)) == NULL)
+    {
+        perror("inet_ntop failed");
+        write(conn->fd, internal_err, strlen(internal_err));
+        return;
+    }
+
+    // Converts IP addresses from strings to numeric elements
+    int h1, h2, h3, h4;
+    if (sscanf(ip_str, "%d.%d.%d.%d", &h1, &h2, &h3, &h4) != 4)
+    {
+        fprintf(stderr, "Invalid IP format: %s\n", ip_str);
+        write(conn->fd, internal_err, strlen(internal_err));
+        return;
+    }
+    dprintf(conn->fd, "227 Entering passive mode (%d,%d,%d,%d,%d,%d) \n",
+            h1, h2, h3, h4,
+            port2, port1);
     return;
 };
 
@@ -454,18 +479,30 @@ void ftp_cmd_list(struct command *cmd, struct connection *conn)
 
     /* Send directory entries. */
     struct stat fs;
-
+    char time_buf[20];
     while ((ent = readdir(cdfd)) != NULL)
     {
+        /* Ignore current and parent directories */
+        if (strcmp(ent->d_name, ".") == 0 || strcmp(ent->d_name, "..") == 0)
+            continue;
         /* Construct the path of the file relative to the working directory. */
         char *file_path = malloc(strlen(path) + strlen(ent->d_name) + 1);
         strcpy(file_path, path);
         strcat(file_path, ent->d_name);
+        if (stat(file_path, &fs) < 0)
+        {
+            free(file_path);
+            continue;
+        }
 
-        stat(file_path, &fs);
         struct passwd *owner_info = getpwuid(fs.st_uid);
         struct group *group_info = getgrgid(fs.st_gid);
         struct tm *modification_time = localtime(&fs.st_mtime);
+        if (modification_time == NULL || strftime(time_buf, sizeof(time_buf), "%b %d %H:%M", modification_time) == 0)
+        {
+            strncpy(time_buf, "??? ?? ??::??", sizeof(time_buf));
+            time_buf[sizeof(time_buf) - 1] = '\0';
+        }
         free(file_path);
         /* Determine file type. */
         char ftype = '-';
@@ -492,51 +529,28 @@ void ftp_cmd_list(struct command *cmd, struct connection *conn)
         }
 
         /* Determine file permissions. */
-        char uperm[4] = "---";
-        char gperm[4] = "---";
-        char operm[4] = "---";
+         char permissions[10];
+        snprintf(permissions, sizeof(permissions), 
+                 "%c%c%c%c%c%c%c%c%c",
+                 (fs.st_mode & S_IRUSR) ? 'r' : '-',
+                 (fs.st_mode & S_IWUSR) ? 'w' : '-',
+                 (fs.st_mode & S_IXUSR) ? 'x' : '-',
+                 (fs.st_mode & S_IRGRP) ? 'r' : '-',
+                 (fs.st_mode & S_IWGRP) ? 'w' : '-',
+                 (fs.st_mode & S_IXGRP) ? 'x' : '-',
+                 (fs.st_mode & S_IROTH) ? 'r' : '-',
+                 (fs.st_mode & S_IWOTH) ? 'w' : '-',
+                 (fs.st_mode & S_IXOTH) ? 'x' : '-');
 
-        if (fs.st_mode & 00400)
-        {
-            uperm[0] = 'r';
-        }
-        if (fs.st_mode & 00200)
-        {
-            uperm[1] = 'w';
-        }
-        if (fs.st_mode & 00100)
-        {
-            uperm[2] = 'x';
-        }
-
-        if (fs.st_mode & 00040)
-        {
-            gperm[0] = 'r';
-        }
-        if (fs.st_mode & 00020)
-        {
-            gperm[1] = 'w';
-        }
-        if (fs.st_mode & 00010)
-        {
-            gperm[2] = 'x';
-        }
-
-        if (fs.st_mode & 00004)
-        {
-            operm[0] = 'r';
-        }
-        if (fs.st_mode & 00002)
-        {
-            operm[1] = 'w';
-        }
-        if (fs.st_mode & 00001)
-        {
-            operm[2] = 'x';
-        }
-
-        dprintf(data_sock, "%c%s%s%s %s %s %8ld %s \r\n", ftype, uperm, gperm, operm, owner_info != NULL ? owner_info->pw_name : "UNKNOWN_OWNER",
-                group_info != NULL ? group_info->gr_name : "UNKNOWN_GROUP", (long)fs.st_size, ent->d_name);
+        dprintf(data_sock, "%c%s %lu %s %s %8ld %s %s\r\n",
+                ftype,
+                permissions,
+                (unsigned long)fs.st_nlink,
+                owner_info != NULL ? owner_info->pw_name : "UNKNOWN_OWNER",
+                group_info != NULL ? group_info->gr_name : "UNKNOWN_GROUP",
+                (long)fs.st_size,
+                time_buf,
+                ent->d_name);
     }
 
     closedir(cdfd);

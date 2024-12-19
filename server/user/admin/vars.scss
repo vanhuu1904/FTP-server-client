@@ -1,0 +1,131 @@
+///
+/// ref: https://docs.google.com/spreadsheets/d/1hxl8zql1LRrIo0pgSR9X5TCoa-4UWumrmTKvWohZjAM
+/// Common part
+$white-color: #ffffff;
+$black-color: #000000;
+$red-color: #ff4e41;
+$dark-color: #092c4c;
+$blue-color: #1d85e8;
+$green-color: #31d0aa;
+$yellow-color: #eeae67;
+$info-color: #1d85e814;
+$text-color: #092c4c; // to easyly customize
+$rate-color: #ffba21;
+$red-color2: #c93939;
+$red-color-error: #e72113;
+$gray-500: #607380;
+$popover-icon-color: #31d0aa;
+$gray-200: #e5e7eb;
+$gray-150: #f0f2f5;
+
+$icon-color: $gray-500; // Normal icon color
+$dark-border-color: #bbbfc3; // Input box, button // gray-300
+$light-border-color: #e1e3e5; // Box, table line color
+$ghost-background-color: #e4e5e7; // ghost background color
+$border-checkbox: $gray-500; // Normal border checkbox
+$border-row-selected: #e2e3e5;
+$border-card: #e8e9f2;
+/// App and popup background color
+///
+$background-color: #f6f6f7;
+$background-color-primary: #f1f1f1;
+$background-email-preview: #f1f3f4;
+$background-color-error: rgba(255, 78, 65, 0.08);
+$background-color-success: #31d0aa14;
+$background-color-warning: rgba(238, 174, 103, 0.08);
+$background-color-info: rgba(29, 133, 232, 0.08);
+$background-color-row-selected: #f6fafe;
+$background-color-button: #e4e7ea;
+/// Màu background icon trong overview
+$icon-background-color: #f1f2f3;
+/// Box background color, title
+///
+$screen-background-color: $white-color;
+/// opacity
+$opacity-087: 0.87;
+$opacity-054: 0.54;
+$opacity-072: 0.72;
+///
+/// https://prnt.sc/tyqtoKe7oebX
+$opacity-place-holder: $opacity-054;
+///
+/// https://prnt.sc/UWH6dlfz-71K
+$opacity-disable: 0.38;
+$opacity-026: 0.26;
+$opacity-016: 0.16;
+$opacity-box-shadow: 0.08;
+/// box-shadow
+$box-shadow: 0px 2px 8px rgba(0, 0, 0, $opacity-box-shadow);
+$box-shadow-12: 0px 2px 8px rgba(0, 0, 0, 0.12);
+$box-shadow-menu: 0px -2px 8px 0px rgba(0, 0, 0, $opacity-box-shadow);
+
+/// Khoảng cách giữa các box, card - https://prnt.sc/WBZXzZ4Weo_0
+/// Khoảng cách giữa các elment như input field, table với các viền box - https://prnt.sc/xe4vyZu15jLh
+$margin: 20px;
+$margin-small: 16px;
+
+/// Khoảng cách giữa các element với nhau - https://prnt.sc/rENrFG0a2IP2
+$margin-element: 16px; //
+$margin-element-small: 12px;
+
+/// font-size
+/// Đối với màn 1367-1440 kích thước chữ sẽ giảm 1 size trừ tooltip (-2px)
+$font-size-24: 24px; // Icon LabaleValueBox
+$font-size-20: 20px;
+$font-size-13: 13px;
+$font-size-xxl: 18px; // Card title
+$font-size-xl: 16px; // Title
+$font-size-md: 14px; // Body text
+$font-size-sm: 13px; // Form field title
+$font-size-xsm: 12px;
+$font-size-xs: 10px; // tooltip
+$font-size-xxs: 8px;
+/// font-weight
+$thin: 100;
+$extra-light: 200;
+$light: 300;
+$normal: 400; // regular
+$medium: 500;
+$semi-bold: 600;
+$bold: 700;
+$extra-bold: 800;
+$black: 900;
+$extra-bold: 950;
+
+/// border-radius
+$border-radius: 4px; // Normal
+$border-radius-md: 3px; // Medium
+$border-radius-sm: 2px; // Tag nhỏ
+
+// Crisp chat spacing
+
+$margin-bottom-crisp: 80px;
+$font-family: 'Poppins', sans-serif;
+$cdnAssets: 'https://d2y7ju1jo0r0dd.cloudfront.net';
+
+$small-screen: 'screen and (max-width: 449px)';
+$small-screen-up: 'screen and (min-width: 449px)';
+
+$medium-screen: 'screen and (min-width: 450px) and (max-width: 767px)';
+$medium-screen-full: 'screen and (min-width: 450px) and (max-width: 1007px)';
+
+$medium-screen-up: 'screen and (min-width: 768px)';
+$medium-screen-up-full: 'screen and (min-width: 1008px)';
+
+$medium-screen-down: 'screen and (max-width: 766px)';
+$medium-screen-down-full: 'screen and (max-width: 1006px)';
+
+$tablet-screen: 'screen and (min-width: 768px) and (max-width: 959px)';
+$tablet-screen-full: 'screen and (min-width: 1008px) and (max-width: 1199px)';
+
+$tablet-screen-up: 'screen and (min-width: 960px)';
+$tablet-screen-up-full: 'screen and (min-width: 1200px)';
+
+$tablet-screen-down: 'screen and (max-width: 958px)';
+$tablet-screen-down-full: 'screen and (max-width: 1198px)';
+
+$large-screen: 'screen and (min-width: 960px)';
+$large-screen-full: 'screen and (min-width: 1200px)';
+
+$large-screen-down: 'screen and (max-width: 959px)';
+$large-screen-down-full: 'screen and (max-width: 1199px)';
