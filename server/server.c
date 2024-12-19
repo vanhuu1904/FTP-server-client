@@ -15,7 +15,7 @@
 #include <fcntl.h>
 #include <arpa/inet.h>
 #define MAX_LINE_LENGTH 300
-#define PORT 1234
+#define PORT 1235
 static const char *cmd_funcs[] = {
     "USER", "PASS", "SYST", "QUIT", "LIST", "PASV", "CWD", "CDUP", "PWD", "RETR", "STOR",
     "DELE", "RMD", "MKD", "TYPE", NULL};
@@ -555,6 +555,7 @@ void ftp_cmd_list(struct command *cmd, struct connection *conn)
 
     closedir(cdfd);
     free(path);
+
 
     write(conn->fd, closing_data_conn, strlen(closing_data_conn));
     close_data_conn(data_sock, conn);
